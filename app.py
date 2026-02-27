@@ -37,9 +37,13 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-credentials = Credentials.from_service_account_file(
-    "key.json",
+import json
+# ✨ 인터넷 비밀 금고(Secrets)에서 key.json 내용을 몰래 가져옵니다.
+creds_dict = json.loads(st.secrets["google_credentials"])
+credentials = Credentials.from_service_account_info(
+    creds_dict,
     scopes=SCOPES
+)
 )
 
 gc = gspread.authorize(credentials)
