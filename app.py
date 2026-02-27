@@ -301,7 +301,7 @@ elif mode == "작업자":
                                 ),
                                 "작업자": st.column_config.SelectboxColumn(
                                     "작업자",
-                                    options=["미지정", "김솔", "작업자A", "작업자B", "작업자C"], 
+                                    options=["유은미", "김정음", "박준수", "김솔", "이승환", "김태주", "기타"], 
                                 ),
                                 "지시사항": st.column_config.TextColumn("지시사항"),
                                 "작업자 코멘트": st.column_config.TextColumn("작업자 코멘트", width=300),
