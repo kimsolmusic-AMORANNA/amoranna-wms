@@ -8,6 +8,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 import io
+import json  # ✨ 비밀 금고를 열기 위한 도구 추가
 
 # ---------------------------------------------------------
 # ✨ 마법 24탄: 여백 정상화 및 모바일 스크롤 유지
@@ -30,26 +31,23 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# 1. 구글 스프레드시트 연결 설정 부분
+# 1. 구글 스프레드시트 연결 설정 부분 (웹 배포용으로 변경됨 ✨)
 # ---------------------------------------------------------
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
-import json
-# ✨ 인터넷 비밀 금고(Secrets)에서 key.json 내용을 몰래 가져옵니다.
-creds_dict = json.loads(st.secrets["google_credentials"])
-credentials = Credentials.from_service_account_info(
-    creds_dict,
-    scopes=SCOPES
-)
-)
-
-gc = gspread.authorize(credentials)
-SPREADSHEET_NAME = "그로스 체크리스트"
-
+# ✨ 인터넷 비밀 금고(Secrets)에서 key.json 내용을 가져옵니다.
 try:
+    creds_dict = json.loads(st.secrets["google_credentials"])
+    credentials = Credentials.from_service_account_info(
+        creds_dict,
+        scopes=SCOPES
+    )
+
+    gc = gspread.authorize(credentials)
+    SPREADSHEET_NAME = "그로스 체크리스트"
     sh = gc.open(SPREADSHEET_NAME)
     connected = True 
 except Exception as e:
@@ -67,14 +65,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# ✨ 요구사항 1 해결: 글자 잘림을 막기 위해 순정 마크다운 제목으로 복구
+# 메인 제목
 st.markdown("### 📦 아모란나 물류팀 입고관리")
 
 if connected:
     st.success("✅ 구글 스프레드시트 연결 성공: '그로스 체크리스트'")
 else:
-    st.warning("⚠️ 구글 스프레드시트에 연결하지 못했습니다. key.json 및 공유 설정을 확인하세요.")
-
+    st.warning("⚠️ 구글 스프레드시트에 연결하지 못했습니다. 비밀 금고(Secrets) 설정을 확인하세요.")
+    if not connected:
+        st.write("에러 상세 내용:", error_message)
 
 # ---------------------------------------------------------
 # 3. 상단 가로 라디오 버튼으로 모드 선택 만들기
@@ -173,166 +172,160 @@ if mode == "관리자":
         st.session_state["save_success"] = False
 
 elif mode == "작업자":
-    try:
-        ws_job = sh.worksheet("그로스 입고관리")
-        all_values = ws_job.get_all_values()
-    except Exception as e:
-        st.error("구글 시트를 불러오는 중 오류가 발생했습니다.")
+    if not connected:
+        st.error("구글 시트가 연결되지 않아 데이터를 불러올 수 없습니다.")
     else:
-        if not all_values or len(all_values) <= 2:
-            st.info("현재 등록된 작업 지시가 없습니다.")
+        try:
+            ws_job = sh.worksheet("그로스 입고관리")
+            all_values = ws_job.get_all_values()
+        except Exception as e:
+            st.error("구글 시트를 불러오는 중 오류가 발생했습니다.")
         else:
-            title_row = all_values[0]
-            header = all_values[1]
-            rows = all_values[2:]
-
-            df_all = pd.DataFrame(rows, columns=header)
-            df_all = df_all.fillna("")
-
-            if "작업상태" in df_all.columns:
-                df_all["작업상태"] = df_all["작업상태"].astype(str).str.strip()
-                df_all.loc[df_all["작업상태"] == "", "작업상태"] = "작업대기"
-
-            sheet_row_map = {idx: idx + 3 for idx in range(len(df_all))}
-
-            import datetime as _dt
-            today = _dt.date.today()
-
-            date_range = st.date_input(
-                "📅 작업 기간 선택", 
-                value=(today, today),
-                label_visibility="visible"
-            )
-
-            if isinstance(date_range, tuple) or isinstance(date_range, list):
-                start_date, end_date = date_range
+            if not all_values or len(all_values) <= 2:
+                st.info("현재 등록된 작업 지시가 없습니다.")
             else:
-                start_date = end_date = date_range
+                title_row = all_values[0]
+                header = all_values[1]
+                rows = all_values[2:]
 
-            if start_date > end_date:
-                start_date, end_date = end_date, start_date
+                df_all = pd.DataFrame(rows, columns=header)
+                df_all = df_all.fillna("")
 
-            if "날짜" not in df_all.columns:
-                st.error("구글 시트에 '날짜' 컬럼이 없습니다.")
-            else:
-                df_all["날짜"] = df_all["날짜"].astype(str).str.strip()
-                df_all["_날짜_dt"] = pd.to_datetime(df_all["날짜"], format="%Y/%m/%d", errors="coerce")
+                if "작업상태" in df_all.columns:
+                    df_all["작업상태"] = df_all["작업상태"].astype(str).str.strip()
+                    df_all.loc[df_all["작업상태"] == "", "작업상태"] = "작업대기"
 
-                start_ts = pd.to_datetime(start_date)
-                end_ts = pd.to_datetime(end_date)
-                date_mask = (df_all["_날짜_dt"] >= start_ts) & (df_all["_날짜_dt"] <= end_ts)
+                sheet_row_map = {idx: idx + 3 for idx in range(len(df_all))}
 
-                if not date_mask.any():
-                    st.info("선택한 기간에 해당하는 작업 지시가 없습니다.")
+                import datetime as _dt
+                today = _dt.date.today()
+
+                date_range = st.date_input(
+                    "📅 작업 기간 선택", 
+                    value=(today, today),
+                    label_visibility="visible"
+                )
+
+                if isinstance(date_range, tuple) or isinstance(date_range, list):
+                    start_date, end_date = date_range
                 else:
-                    filtered_df = df_all[date_mask].copy()
-                    filtered_df["_날짜_str"] = filtered_df["날짜"].astype(str).str.strip()
+                    start_date = end_date = date_range
 
-                    display_cols = [
-                        "날짜", "옵션 ID", "품목명", "목표수량", 
-                        "완료수량", "작업상태", "작업자", "지시사항", "작업자 코멘트"
-                    ]
+                if start_date > end_date:
+                    start_date, end_date = end_date, start_date
 
-                    missing_cols = [c for c in display_cols if c not in filtered_df.columns]
-                    if missing_cols:
-                        st.error(f"시트에 다음 컬럼이 없습니다: {missing_cols}")
+                if "날짜" not in df_all.columns:
+                    st.error("구글 시트에 '날짜' 컬럼이 없습니다.")
+                else:
+                    df_all["날짜"] = df_all["날짜"].astype(str).str.strip()
+                    df_all["_날짜_dt"] = pd.to_datetime(df_all["날짜"], format="%Y/%m/%d", errors="coerce")
+
+                    start_ts = pd.to_datetime(start_date)
+                    end_ts = pd.to_datetime(end_date)
+                    date_mask = (df_all["_날짜_dt"] >= start_ts) & (df_all["_날짜_dt"] <= end_ts)
+
+                    if not date_mask.any():
+                        st.info("선택한 기간에 해당하는 작업 지시가 없습니다.")
                     else:
-                        sorted_df = filtered_df.sort_values("_날짜_dt").copy()
-                        filtered_sheet_rows = [sheet_row_map[i] for i in sorted_df.index]
+                        filtered_df = df_all[date_mask].copy()
+                        filtered_df["_날짜_str"] = filtered_df["날짜"].astype(str).str.strip()
 
-                        original_view_df = sorted_df[display_cols].copy().reset_index(drop=True)
-                        original_view_df = original_view_df.astype(str)
-                        original_view_df = original_view_df.replace(to_replace=["None", "nan", "NaN", "<NA>"], value="")
+                        display_cols = [
+                            "날짜", "옵션 ID", "품목명", "목표수량", 
+                            "완료수량", "작업상태", "작업자", "지시사항", "작업자 코멘트"
+                        ]
 
-                        # =========================================================
-                        # ✨ 요구사항 3 해결: 빈칸(공백) 무시하고 작업완료 형광펜 칠하기
-                        # =========================================================
-                        unique_dates = original_view_df['날짜'].unique()
-                        date_color_map = {}
-                        for i, date_val in enumerate(unique_dates):
-                            if i % 2 == 0:
-                                date_color_map[date_val] = "background-color: #ffffff"
-                            else:
-                                date_color_map[date_val] = "background-color: #f2f6fc"
+                        missing_cols = [c for c in display_cols if c not in filtered_df.columns]
+                        if missing_cols:
+                            st.error(f"시트에 다음 컬럼이 없습니다: {missing_cols}")
+                        else:
+                            sorted_df = filtered_df.sort_values("_날짜_dt").copy()
+                            filtered_sheet_rows = [sheet_row_map[i] for i in sorted_df.index]
 
-                        def apply_row_styles(row):
-                            # 글자 앞뒤의 쓸데없는 띄어쓰기를 지워주고 비교합니다.
-                            status = str(row['작업상태']).strip()
-                            if status == '작업완료':
-                                color = "background-color: #ccffcc" # 형광 연두색
-                            else:
-                                color = date_color_map.get(row['날짜'], '')
-                            return [color] * len(row)
+                            original_view_df = sorted_df[display_cols].copy().reset_index(drop=True)
+                            original_view_df = original_view_df.astype(str)
+                            original_view_df = original_view_df.replace(to_replace=["None", "nan", "NaN", "<NA>"], value="")
 
-                        styled_df = original_view_df.style.apply(apply_row_styles, axis=1)
+                            unique_dates = original_view_df['날짜'].unique()
+                            date_color_map = {}
+                            for i, date_val in enumerate(unique_dates):
+                                if i % 2 == 0:
+                                    date_color_map[date_val] = "background-color: #ffffff"
+                                else:
+                                    date_color_map[date_val] = "background-color: #f2f6fc"
 
-                        # =========================================================
-                        # ✨ 요구사항 2 해결: 버튼 크기 줄이고 한 줄에 옹기종기 모으기
-                        # =========================================================
-                        st.write("") # 약간의 여백
-                        col1, col2, col3 = st.columns([2.5, 1, 1.5])
-                        with col1:
-                            st.markdown("#### 📋 작업 목록")
-                        with col2:
-                            # use_container_width 옵션을 빼서 버튼을 작게 만들었습니다.
-                            if st.button("🔄 새로고침", key="refresh_all"):
-                                st.rerun()
-                        with col3:
+                            def apply_row_styles(row):
+                                status = str(row['작업상태']).strip()
+                                if status == '작업완료':
+                                    color = "background-color: #ccffcc" # 형광 연두색
+                                else:
+                                    color = date_color_map.get(row['날짜'], '')
+                                return [color] * len(row)
+
+                            styled_df = original_view_df.style.apply(apply_row_styles, axis=1)
+
+                            st.write("") # 약간의 여백
+                            col1, col2, col3 = st.columns([2.5, 1, 1.5])
+                            with col1:
+                                st.markdown("#### 📋 작업 목록")
+                            with col2:
+                                if st.button("🔄 새로고침", key="refresh_all"):
+                                    st.rerun()
+                            with col3:
+                                try:
+                                    buffer = io.BytesIO()
+                                    original_view_df.to_excel(buffer, index=False)
+                                    buffer.seek(0)
+                                    filename = f"입고관리_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
+
+                                    st.download_button(
+                                        "📥 엑셀 저장",
+                                        data=buffer,
+                                        file_name=filename,
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="download_all"
+                                    )
+                                except Exception as e:
+                                    st.error(f"엑셀 오류: {e}")
+
+                            column_config = {
+                                "날짜": st.column_config.TextColumn("날짜", disabled=True),
+                                "옵션 ID": st.column_config.TextColumn("옵션 ID", disabled=True),
+                                "품목명": st.column_config.TextColumn("품목명", disabled=True),
+                                "목표수량": st.column_config.TextColumn("목표수량", disabled=True, width="small"),
+                                "완료수량": st.column_config.TextColumn("완료수량", width="small"),
+                                "작업상태": st.column_config.SelectboxColumn(
+                                    "작업상태",
+                                    options=["작업대기", "작업준비", "작업완료", "작업불가(재고부족)", "작업연기", "기타"],
+                                    required=True,
+                                ),
+                                "작업자": st.column_config.SelectboxColumn(
+                                    "작업자",
+                                    options=["미지정", "김솔", "작업자A", "작업자B", "작업자C"], 
+                                ),
+                                "지시사항": st.column_config.TextColumn("지시사항"),
+                                "작업자 코멘트": st.column_config.TextColumn("작업자 코멘트", width=300),
+                            }
+
+                            edited_jobs_df = st.data_editor(
+                                styled_df,
+                                column_config=column_config,
+                                use_container_width=False, 
+                                num_rows="dynamic",
+                                height=500,
+                                key="worker_table_all",
+                            )
+
                             try:
-                                buffer = io.BytesIO()
-                                original_view_df.to_excel(buffer, index=False)
-                                buffer.seek(0)
-                                filename = f"입고관리_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
+                                if not edited_jobs_df.equals(original_view_df):
+                                    changed_mask = (edited_jobs_df != original_view_df).any(axis=1)
+                                    for local_idx, changed in enumerate(changed_mask):
+                                        if not changed: continue
 
-                                st.download_button(
-                                    "📥 엑셀 저장",
-                                    data=buffer,
-                                    file_name=filename,
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="download_all"
-                                    # 여기서도 옵션을 빼서 버튼 크기를 작게 줄였습니다.
-                                )
+                                        sheet_row = filtered_sheet_rows[local_idx]
+                                        row_values = edited_jobs_df.iloc[local_idx][display_cols].tolist()
+
+                                        cell_range = f"A{sheet_row}:I{sheet_row}"
+                                        ws_job.update(cell_range, [row_values], value_input_option="USER_ENTERED")
                             except Exception as e:
-                                st.error(f"엑셀 오류: {e}")
-
-                        column_config = {
-                            "날짜": st.column_config.TextColumn("날짜", disabled=True),
-                            "옵션 ID": st.column_config.TextColumn("옵션 ID", disabled=True),
-                            "품목명": st.column_config.TextColumn("품목명", disabled=True),
-                            "목표수량": st.column_config.TextColumn("목표수량", disabled=True, width="small"),
-                            "완료수량": st.column_config.TextColumn("완료수량", width="small"),
-                            "작업상태": st.column_config.SelectboxColumn(
-                                "작업상태",
-                                options=["작업대기", "작업준비", "작업완료", "작업불가(재고부족)", "작업연기", "기타"],
-                                required=True,
-                            ),
-                            "작업자": st.column_config.SelectboxColumn(
-                                "작업자",
-                                options=["유은미", "김정음", "박준수", "김솔", "이승환", "김태주", "기타"], 
-                            ),
-                            "지시사항": st.column_config.TextColumn("지시사항"),
-                            "작업자 코멘트": st.column_config.TextColumn("작업자 코멘트", width=300),
-                        }
-
-                        edited_jobs_df = st.data_editor(
-                            styled_df,
-                            column_config=column_config,
-                            use_container_width=False, 
-                            num_rows="dynamic",
-                            height=500,
-                            key="worker_table_all",
-                        )
-
-                        try:
-                            if not edited_jobs_df.equals(original_view_df):
-                                changed_mask = (edited_jobs_df != original_view_df).any(axis=1)
-                                for local_idx, changed in enumerate(changed_mask):
-                                    if not changed: continue
-
-                                    sheet_row = filtered_sheet_rows[local_idx]
-                                    row_values = edited_jobs_df.iloc[local_idx][display_cols].tolist()
-
-                                    cell_range = f"A{sheet_row}:I{sheet_row}"
-                                    ws_job.update(cell_range, [row_values], value_input_option="USER_ENTERED")
-                        except Exception as e:
-                            st.error(f"저장 중 에러 발생: {e}")
+                                st.error(f"저장 중 에러 발생: {e}")
